@@ -1,4 +1,4 @@
-//
+
 //  NSObject+ModelValueToView.m
 //  111
 //
@@ -28,20 +28,25 @@ typedef NS_OPTIONS(NSInteger, CJPropertType) {
 };
 
 
-
 @implementation NSObject (ModelValueToView)
 
 
 - (void)getValueFromModel:(id)model{
+    
     if(!model || !self) return;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-variable"
     NSMutableArray *modelPropertyNameArray          = [model filterPropertys];
+    NSMutableArray *modelIvarTypeEncodings          = [model filterIvarTypeEncodings];
+    NSMutableArray *modelPropertyAtts               = [model attributesPropertys];
     NSMutableArray *ViewOrOtherPropertyNameArray    = [self filterPropertys];
     NSMutableArray *ViewOrOtherPropertyAttsArray    = [self attributesPropertys];
     NSMutableArray *viewOrOtherIvarNamesArray       = [self filterIvarNames];
     NSMutableArray *viewOrtherIvarTypeEncodings     = [self filterIvarTypeEncodings];
+    NSMutableArray *viewOrOtherMethodTypeEncoding   = [self filterMethods];
 #pragma clang diagnostic pop
+    //容器
+//    __block NSMutableArray *modelTypeEocodings  = [NSMutableArray array];
     if (modelPropertyNameArray.count == 0 || ViewOrOtherPropertyNameArray.count == 0 ) return;
     //all name
     for (NSUInteger i= 0; i < ViewOrOtherPropertyNameArray.count; i ++) {
@@ -61,7 +66,10 @@ typedef NS_OPTIONS(NSInteger, CJPropertType) {
                 NSLog(@"idx --- %ld",idx);
                 NSString *modelPropertyName = (NSString *)obj;
                 //ViewOrOtherPropertyName contains modelPropertyName ?:
-                if ([propertyInfo.propertyName rangeOfString:modelPropertyName].location != NSNotFound) {
+                if ([propertyInfo.propertyName rangeOfString:modelPropertyName].location != NSNotFound ) {
+                    
+                    
+                    
                     SEL viewOrOtherSel = NSSelectorFromString(modelPropertyName);
                     //responds ?:
                     if ([model respondsToSelector:viewOrOtherSel] ) {
@@ -72,12 +80,14 @@ typedef NS_OPTIONS(NSInteger, CJPropertType) {
                         [invocation setSelector:viewOrOtherSel];
                         [invocation invoke];
                         
-                        if ([propertyInfo.propertyTypeEncoding containsString:@"@"]) {
+                        if ([propertyInfo.propertyAttribute containsString:@"T@"] && [modelPropertyAtts[idx] containsString:@"T@"]) {
+
                             NSObject *returnValue = nil;
                             [invocation getReturnValue:&returnValue];
-                            
-                            if (propertyInfo.isTypeOfUI && propertyInfo.isHasPostfix && propertyInfo.isCorrectNameType) {
-                                
+
+                            if (propertyInfo.isTypeOfUI  && propertyInfo.isCorrectNameType && propertyInfo.isHasPostfix) {
+                                NSAssert([NSThread isMainThread], @"只能在主线程中执行");
+
                                 NSString *totalString = propertyInfo.isHasAddMark ? [self getValueByInvationWithSelName:propertyInfo.modelProertyList target:model] :[NSString stringWithFormat:@"%@",returnValue] ;
                                 
                                 if (propertyInfo.propertPostfixType == CJPropertPostfixTypeLabel) {
@@ -105,12 +115,14 @@ typedef NS_OPTIONS(NSInteger, CJPropertType) {
                                     textView.text = totalString;
                                    
                                 }
-                            }else{
+                            }else if([propertyInfo.propertyName isEqualToString:modelPropertyName] || propertyInfo.isHasAddMark){
                                 // another (!UI) object. exmp:  system classes like 'NSNumber','NSDictionary','NSArray','NSString' or others like 'CJSHUAIGE',defined by yourself.
+                                
                                 NSString *firstLetterUp = [[propertyInfo.propertyName substringToIndex:1] uppercaseString];
                                 ViewOrOtherPropertyName = [ propertyInfo.propertyName stringByReplacingCharactersInRange:NSMakeRange(0, 1) withString:firstLetterUp];
                                 ViewOrOtherPropertyName = [[@"set" stringByAppendingString:ViewOrOtherPropertyName] stringByAppendingString:@":"];
                                 SEL setMethod = NSSelectorFromString(ViewOrOtherPropertyName);
+                                //string可以拼接
                                 if (propertyInfo.propertPostfixType == CJPropertPostfixTypeNSString) {
                                     NSString *totalString = propertyInfo.modelProertyList.count > 1 ? [self getValueByInvationWithSelName:propertyInfo.modelProertyList target:model] :[NSString stringWithFormat:@"%@",returnValue] ;
                                     [self performSelectorOnMainThread:setMethod withObject:totalString waitUntilDone:[NSThread isMainThread]];
@@ -121,7 +133,14 @@ typedef NS_OPTIONS(NSInteger, CJPropertType) {
                                 }
                                 
                             }
+                            //!@
+                        }else if([propertyInfo.propertyName isEqualToString:modelPropertyName] || propertyInfo.isHasAddMark){
+//                            [self getScalarValueByInvationWithPropertyName:propertyInfo.propertyName target:model andModelPropertyTypeEncode:modelIvarTypeEncodings[idx] invocation:invocation];
+                            CGFloat x = [self getScalarValueByInvationWithSelName:propertyInfo.modelProertyList target:model];
+                            [self setValue:@(x) forKey:propertyInfo.propertyName];
+
                         }
+                        
                     }
                 }
             }
@@ -155,7 +174,7 @@ typedef NS_OPTIONS(NSInteger, CJPropertType) {
     
     self.isHasPostfix = [self propertyHasPostfix:propertyName];
     self.isHasAddMark = [self.propertyName containsString:addMark];
-    self.isReadonly   = [propertyAttribute containsString:@"R"];
+    self.isReadonly   = [propertyAttribute containsString:@",R"];
     self.isTypeOfUI   = [propertyAttribute containsString:@"UI"];
 
     
@@ -305,6 +324,18 @@ typedef NS_OPTIONS(NSInteger, CJPropertType) {
     return ivars;
 }
 
+- (NSMutableArray *)filterMethods{
+    NSMutableArray *methods = [NSMutableArray array];
+    unsigned int outCount,i;
+    Method *method = class_copyMethodList([self class], &outCount);
+    for (i = 0; i < outCount; i ++) {
+        const char* char_f = method_getTypeEncoding(method[i]);
+        
+        [methods addObject:[NSString stringWithUTF8String:char_f]];
+    }
+    return methods;
+}
+
 
 - (NSString *)getValueByInvationWithSelName:(NSArray<NSString *> *)selName target:(nonnull id)target{
     NSString *str1 = @"";
@@ -332,5 +363,101 @@ typedef NS_OPTIONS(NSInteger, CJPropertType) {
     return str1;
 }
 
+
+-(id)getScalarValueByInvationWithPropertyName:(NSString *)propertyName target:(id)target andModelPropertyTypeEncode:(NSString *)ModelPropertyTypeEncode invocation:(NSInvocation * _Nonnull)invocation{
+    
+    
+    //原生是不支持 long double
+    int        iReturnValue;
+    long       lReturnValue;
+    long long  qReturnValue;
+    short      sReturnValue;
+    
+    float      fReturnValue;
+    double     dReturnValue;
+    
+    unsigned int       IReturnValue;
+    unsigned short     SReturnValue;
+    unsigned long      LReturnValue;
+    unsigned long long QReturnValue;
+    const char* char_f = [ModelPropertyTypeEncode cStringUsingEncoding:NSASCIIStringEncoding];
+    //如果缺少某种类型会中断，请告诉我
+    NSString *str = [NSString stringWithFormat:@"类型%s缺少",char_f];
+    switch (*char_f) {
+        case 'i':
+            [invocation getReturnValue:&iReturnValue];
+            [self setValue:@(iReturnValue) forKey:propertyName];
+            break;
+        case 'l':
+            [invocation getReturnValue:&lReturnValue];
+            [self setValue:@(lReturnValue) forKey:propertyName];
+            break;
+        case 'q':
+            [invocation getReturnValue:&qReturnValue];
+            [self setValue:@(qReturnValue) forKey:propertyName];
+            break;
+        case 's':
+            [invocation getReturnValue:&sReturnValue];
+            [self setValue:@(sReturnValue) forKey:propertyName];
+            break;
+        case 'I':
+            [invocation getReturnValue:&IReturnValue];
+            [self setValue:@(IReturnValue) forKey:propertyName];
+            break;
+        case 'S':
+            [invocation getReturnValue:&SReturnValue];
+            [self setValue:@(SReturnValue) forKey:propertyName];
+            break;
+        case 'L':
+            [invocation getReturnValue:&LReturnValue];
+            [self setValue:@(LReturnValue) forKey:propertyName];
+            break;
+        case 'Q':
+            [invocation getReturnValue:&QReturnValue];
+            [self setValue:@(QReturnValue) forKey:propertyName];
+            break;
+        case 'f':
+            [invocation getReturnValue:&fReturnValue];
+            [self setValue:@( fReturnValue) forKey:propertyName];
+            break;
+        case 'd':
+            [invocation getReturnValue:&dReturnValue];
+            [self setValue:@( dReturnValue) forKey:propertyName];
+            break;
+        default:
+            @throw [NSException exceptionWithName:@"缺少类型" reason:str userInfo:nil];
+            break;
+    }
+    
+    return [self valueForKey:propertyName];
+}
+
+- (CGFloat)getScalarValueByInvationWithSelName:(NSArray<NSString *> *)selName target:(id)target{
+    CGFloat c = 0;
+    for (NSUInteger i = 0; i < selName.count; i ++) {
+        SEL sel = NSSelectorFromString(selName[i]);
+        NSMethodSignature *signature = [target methodSignatureForSelector:sel];
+        if (!signature) {
+            NSLog(@"selName [i] === %@",selName[i]);
+            @throw [NSException exceptionWithName:@"核实参数" reason:@"model参数名有误，或者拼接参数错误 ,请仔细检查后重试" userInfo:nil];
+        }
+        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+        [invocation setTarget:target];
+        [invocation setSelector:sel];
+        [invocation invoke];
+        NSUInteger j;
+        if ([[target filterPropertys] containsObject:selName[i]]) {
+            j = [[target filterPropertys] indexOfObject:selName[i]];
+
+        }
+        NSString *modelAtt = [[target attributesPropertys][j] substringWithRange:NSMakeRange(1, 1)];
+       c += [[self getScalarValueByInvationWithPropertyName:selName[i] target:target andModelPropertyTypeEncode:modelAtt invocation:invocation] floatValue];
+        
+    }
+    
+    
+    return c;
+    
+}
 
 @end
